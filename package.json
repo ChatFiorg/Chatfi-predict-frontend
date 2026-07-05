@@ -1,29 +1,12 @@
 {
-  "name": "chatfi-predict-web",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
-    "preview": "vite preview"
-  },
+  "name": "goviral-webhook",
+  "version": "1.0.0",
+  "description": "GoViral Flutterwave webhook handler",
+  "main": "index.js",
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "@coral-xyz/anchor": "^0.32.1",
-    "@solana/web3.js": "^1.95.0",
-    "@solana/spl-token": "^0.4.8",
-    "@solana/wallet-adapter-base": "^0.9.23",
-    "@solana/wallet-adapter-react": "^0.15.35",
-    "@solana/wallet-adapter-react-ui": "^0.9.35",
-    "@solana/wallet-adapter-wallets": "^0.19.32"
+    "firebase-admin": "^12.0.0"
   },
-  "devDependencies": {
-    "@types/react": "18.2.79",
-    "@types/react-dom": "18.2.25",
-    "@vitejs/plugin-react": "^4.3.1",
-    "typescript": "^5.5.3",
-    "vite": "^5.4.1"
+  "engines": {
+    "node": "18.x"
   }
 }
