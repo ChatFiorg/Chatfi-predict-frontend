@@ -291,7 +291,15 @@ export async function fetchStake(
 }
 
 /** Lists every pool created on-chain, newest first, for a feed/list screen. */
-export async function fetchAllPools(program: any): Promise<PoolDisplay[]> {
-  const all = (await program.account.pool.all()) as { account: PoolAccount }[];
-  return all.map((entry) => toPoolDisplay(entry.account));
+export async function fetchAllPools(
+  program: any
+): Promise<{ pda: PublicKey; display: PoolDisplay }[]> {
+  const all = (await program.account.pool.all()) as {
+    publicKey: PublicKey;
+    account: PoolAccount;
+  }[];
+  return all.map((entry) => ({
+    pda: entry.publicKey,
+    display: toPoolDisplay(entry.account),
+  }));
 }

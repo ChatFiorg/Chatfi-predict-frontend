@@ -1,4 +1,4 @@
-import { FC, useState } from "react";
+import { FC, useState, useEffect } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
@@ -11,20 +11,38 @@ import { PoolFeed } from "./components/PoolFeed";
 import { CreatePoolModal, NewPoolInput } from "./components/CreatePoolModal";
 import { DEMO_MODE, PROGRAM_ID } from "./config";
 import { DEMO_POOLS } from "./mockData";
-import { createPoolNative, placeStakeNative } from "./lib/chatfi-predict-client";
+import { createPoolNative, placeStakeNative, fetchAllPools } from "./lib/chatfi-predict-client";
 
-// Once you've dropped in the real IDL and set DEMO_MODE to false in
-// config.ts, uncomment this line:
-// import idl from "./idl/prediction_market.json";
+import idl from "./idl/prediction_market.json";
 
 export const App: FC = () => {
   const { connection } = useConnection();
   const wallet = useWallet();
   const { setVisible } = useWalletModal();
 
-  const [pools, setPools] = useState(DEMO_POOLS);
+  const [pools, setPools] = useState(DEMO_MODE ? DEMO_POOLS : []);
   const [showCreate, setShowCreate] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [loadingPools, setLoadingPools] = useState(!DEMO_MODE);
+
+  useEffect(() => {
+    if (DEMO_MODE) return;
+    if (!wallet.publicKey || !wallet.signTransaction) {
+      setLoadingPools(false);
+      return;
+    }
+    const provider = new AnchorProvider(connection, wallet as any, {});
+    const program = new Program(idl as any, provider);
+    setLoadingPools(true);
+    fetchAllPools(program)
+      .then((fetched) => setPools(fetched))
+      .catch((e) => {
+        console.error("Failed to fetch pools:", e);
+        flashToast("Could not load pools from chain, see console for details.");
+      })
+      .finally(() => setLoadingPools(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet.publicKey]);
 
   function flashToast(message: string) {
     setToast(message);
@@ -35,9 +53,7 @@ export const App: FC = () => {
     if (DEMO_MODE) return null;
     if (!wallet.publicKey || !wallet.signTransaction) return null;
     const provider = new AnchorProvider(connection, wallet as any, {});
-    // Replace `idl` below with the imported IDL once wired up.
-    // return new Program(idl as any, provider);
-    return null;
+    return new Program(idl as any, provider);
   }
 
   async function handleCreatePool(input: NewPoolInput) {
@@ -159,7 +175,19 @@ export const App: FC = () => {
       <Header />
       <Ticker pools={pools.map((p) => p.display)} />
       <Hero onCreateClick={() => setShowCreate(true)} />
-      <PoolFeed pools={pools} onStake={handleStake} />
+      {!DEMO_MODE && loadingPools && (
+        <div className="container" style={{ padding: "40px 20px", textAlign: "center", color: "var(--muted)", fontFamily: "var(--font-mono)" }}>
+          Loading pools from devnet...
+        </div>
+      )}
+      {!DEMO_MODE && !loadingPools && !wallet.publicKey && (
+        <div className="container" style={{ padding: "40px 20px", textAlign: "center", color: "var(--muted)", fontFamily: "var(--font-mono)" }}>
+          Connect your wallet to view live pools.
+        </div>
+      )}
+      {(DEMO_MODE || wallet.publicKey) && !loadingPools && (
+        <PoolFeed pools={pools} onStake={handleStake} />
+      )}
 
       {showCreate && (
         <CreatePoolModal onClose={() => setShowCreate(false)} onSubmit={handleCreatePool} />

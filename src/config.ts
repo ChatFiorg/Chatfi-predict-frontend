@@ -3,13 +3,13 @@
  * program ID + IDL. Demo mode uses mock pool data so the UI can be built
  * and reviewed before the program is wired in.
  */
-export const DEMO_MODE = true;
+export const DEMO_MODE = false;
 
 /**
  * After deploying (via Solana Playground's Deploy button, or anchor deploy),
  * replace this with your real program ID from `declare_id!` / Anchor.toml.
  */
-export const PROGRAM_ID = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS";
+export const PROGRAM_ID = "BV4HTjLb3AxFqtkRFGk4joTN8xSDkuMJCSLEL2qcLJxZ";
 
 /**
  * Export the IDL from Solana Playground (Export IDL, in the Build panel's
