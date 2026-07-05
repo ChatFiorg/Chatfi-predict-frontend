@@ -1,3 +1,6 @@
+import { Buffer } from "buffer";
+(window as any).Buffer = (window as any).Buffer || Buffer;
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
@@ -39,12 +42,21 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-window.addEventListener("error", (e) => {
-  const el = document.getElementById("root");
-  if (el && el.innerHTML.trim() === "") {
-    el.innerHTML = `<pre style="color:#ff5a3c;background:#0a0b08;padding:20px;font-size:12px;white-space:pre-wrap;min-height:100vh;">GLOBAL ERROR:\n${e.message}\n\n${e.filename}:${e.lineno}:${e.colno}\n\n${e.error?.stack ?? ""}</pre>`;
-  }
-});
+window.addEventListener(
+  "error",
+  (e) => {
+    const el = document.getElementById("root");
+    if (el && el.innerHTML.trim() === "") {
+      const target = e.target as HTMLElement | null;
+      const resourceInfo =
+        target && (target as any).src
+          ? `Failed resource: ${(target as any).src}`
+          : `${e.filename}:${e.lineno}:${e.colno}`;
+      el.innerHTML = `<pre style="color:#ff5a3c;background:#0a0b08;padding:20px;font-size:12px;white-space:pre-wrap;min-height:100vh;">GLOBAL ERROR:\n${e.message || "(resource load error)"}\n\n${resourceInfo}\n\n${e.error?.stack ?? ""}</pre>`;
+    }
+  },
+  true
+);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

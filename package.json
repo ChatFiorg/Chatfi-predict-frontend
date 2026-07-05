@@ -13,6 +13,7 @@
   "dependencies": {
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "buffer": "^6.0.3",
     "@coral-xyz/anchor": "^0.32.1",
     "@solana/web3.js": "^1.95.0",
     "@solana/spl-token": "^0.4.8",
