@@ -2,27 +2,48 @@ import { FC, useState } from "react";
 
 export interface NewPoolInput {
   question: string;
-  yesLabel: string;
-  noLabel: string;
+  outcomeNames: string[];
   hoursUntilClose: number;
 }
 
 interface Props {
   onClose: () => void;
   onSubmit: (input: NewPoolInput) => Promise<void>;
+  creationFeeSol?: number;
 }
 
-export const CreatePoolModal: FC<Props> = ({ onClose, onSubmit }) => {
+const MIN_OUTCOMES = 2;
+const MAX_OUTCOMES = 8;
+
+export const CreatePoolModal: FC<Props> = ({ onClose, onSubmit, creationFeeSol }) => {
   const [question, setQuestion] = useState("");
-  const [yesLabel, setYesLabel] = useState("Yes");
-  const [noLabel, setNoLabel] = useState("No");
+  const [outcomes, setOutcomes] = useState<string[]>(["Yes", "No"]);
   const [hours, setHours] = useState("24");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  function updateOutcome(index: number, value: string) {
+    setOutcomes((prev) => prev.map((o, i) => (i === index ? value : o)));
+  }
+
+  function addOutcome() {
+    if (outcomes.length >= MAX_OUTCOMES) return;
+    setOutcomes((prev) => [...prev, ""]);
+  }
+
+  function removeOutcome(index: number) {
+    if (outcomes.length <= MIN_OUTCOMES) return;
+    setOutcomes((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function handleSubmit() {
     if (question.trim().length === 0) {
       setError("Add a question first.");
+      return;
+    }
+    const cleanedOutcomes = outcomes.map((o) => o.trim()).filter((o) => o.length > 0);
+    if (cleanedOutcomes.length < MIN_OUTCOMES) {
+      setError(`Add at least ${MIN_OUTCOMES} outcome labels.`);
       return;
     }
     setError(null);
@@ -30,8 +51,7 @@ export const CreatePoolModal: FC<Props> = ({ onClose, onSubmit }) => {
     try {
       await onSubmit({
         question: question.trim(),
-        yesLabel: yesLabel.trim() || "Yes",
-        noLabel: noLabel.trim() || "No",
+        outcomeNames: cleanedOutcomes,
         hoursUntilClose: parseFloat(hours) || 24,
       });
       onClose();
@@ -56,19 +76,37 @@ export const CreatePoolModal: FC<Props> = ({ onClose, onSubmit }) => {
             id="question"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Will Tinubu address the nation today?"
+            placeholder="Who wins the 2027 election?"
           />
         </div>
 
-        <div className="field-row">
-          <div className="field">
-            <label htmlFor="yes">Yes label</label>
-            <input id="yes" value={yesLabel} onChange={(e) => setYesLabel(e.target.value)} />
-          </div>
-          <div className="field">
-            <label htmlFor="no">No label</label>
-            <input id="no" value={noLabel} onChange={(e) => setNoLabel(e.target.value)} />
-          </div>
+        <div className="field">
+          <label>Outcomes (2-8)</label>
+          {outcomes.map((outcome, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input
+                value={outcome}
+                onChange={(e) => updateOutcome(i, e.target.value)}
+                placeholder={`Outcome ${i + 1}`}
+                style={{ flex: 1 }}
+              />
+              {outcomes.length > MIN_OUTCOMES && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ padding: "0 14px" }}
+                  onClick={() => removeOutcome(i)}
+                >
+                  &minus;
+                </button>
+              )}
+            </div>
+          ))}
+          {outcomes.length < MAX_OUTCOMES && (
+            <button type="button" className="btn-secondary" style={{ width: "100%" }} onClick={addOutcome}>
+              + Add outcome
+            </button>
+          )}
         </div>
 
         <div className="field">
@@ -81,6 +119,12 @@ export const CreatePoolModal: FC<Props> = ({ onClose, onSubmit }) => {
             onChange={(e) => setHours(e.target.value)}
           />
         </div>
+
+        {creationFeeSol !== undefined && creationFeeSol > 0 && (
+          <p style={{ color: "var(--muted)", fontSize: 12, fontFamily: "var(--font-mono)", marginBottom: 12 }}>
+            Creating a pool costs {creationFeeSol} SOL, paid to the platform (deters spam).
+          </p>
+        )}
 
         {error && (
           <p style={{ color: "var(--coral)", fontSize: 13, marginBottom: 12 }}>{error}</p>

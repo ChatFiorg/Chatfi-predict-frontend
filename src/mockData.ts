@@ -3,7 +3,6 @@ import { BN } from "@coral-xyz/anchor";
 import { PoolDisplay } from "./lib/chatfi-predict-client";
 
 function mockPda(seed: string): PublicKey {
-  // Deterministic-looking fake address for demo display purposes only.
   const bytes = new Uint8Array(32);
   for (let i = 0; i < seed.length; i++) bytes[i % 32] ^= seed.charCodeAt(i);
   return new PublicKey(bytes);
@@ -11,73 +10,70 @@ function mockPda(seed: string): PublicKey {
 
 const now = Math.floor(Date.now() / 1000);
 
+function pool(
+  question: string,
+  outcomeNames: string[],
+  oddsPercent: number[],
+  isNativeSol: boolean,
+  status: PoolDisplay["status"],
+  closeOffsetSecs: number
+): PoolDisplay {
+  return {
+    question,
+    outcomeNames,
+    outcomeCount: outcomeNames.length,
+    isNativeSol,
+    tokenMint: isNativeSol ? null : mockPda("usdc"),
+    totalStakedRaw: new BN(0),
+    stakePerOutcomeRaw: outcomeNames.map(() => new BN(0)),
+    oddsPercent,
+    closeTs: now + closeOffsetSecs,
+    resolveTs: now + closeOffsetSecs + 300,
+    status,
+    winningOutcome: status === "resolved" ? 0 : null,
+    feesCollected: status === "resolved",
+    proposedOutcome: null,
+    proposer: null,
+    disputeDeadline: null,
+    disputer: null,
+    admin: mockPda("admin"),
+    creator: mockPda("creator"),
+  };
+}
+
 export const DEMO_POOLS: { display: PoolDisplay; pda: PublicKey }[] = [
   {
     pda: mockPda("tinubu-address"),
-    display: {
-      question: "Will Tinubu address the nation today?",
-      outcomeNames: ["Yes", "No"],
-      isNativeSol: true,
-      tokenMint: null,
-      totalStakedRaw: new BN(0),
-      stakePerOutcomeRaw: [new BN(0), new BN(0)],
-      oddsPercent: [64, 36],
-      closeTs: now + 3600 * 6,
-      resolveTs: now + 3600 * 6 + 300,
-      status: "open",
-      winningOutcome: null,
-      feesCollected: false,
-    },
+    display: pool("Will Tinubu address the nation today?", ["Yes", "No"], [64, 36], true, "open", 3600 * 6),
   },
   {
     pda: mockPda("lekki-flood"),
-    display: {
-      question: "Will Lekki flood before 6pm today?",
-      outcomeNames: ["Yes", "No"],
-      isNativeSol: true,
-      tokenMint: null,
-      totalStakedRaw: new BN(0),
-      stakePerOutcomeRaw: [new BN(0), new BN(0)],
-      oddsPercent: [41, 59],
-      closeTs: now + 3600 * 2,
-      resolveTs: now + 3600 * 2 + 300,
-      status: "open",
-      winningOutcome: null,
-      feesCollected: false,
-    },
+    display: pool("Will Lekki flood before 6pm today?", ["Yes", "No"], [41, 59], true, "open", 3600 * 2),
+  },
+  {
+    pda: mockPda("2027-election"),
+    display: pool(
+      "Who wins the 2027 presidential election?",
+      ["Tinubu", "Obi", "Atiku"],
+      [45, 33, 22],
+      true,
+      "open",
+      3600 * 24 * 30
+    ),
   },
   {
     pda: mockPda("davido-posts"),
-    display: {
-      question: "Will Davido post on IG more than 3 times today?",
-      outcomeNames: ["Yes", "No"],
-      isNativeSol: false,
-      tokenMint: mockPda("usdc"),
-      totalStakedRaw: new BN(0),
-      stakePerOutcomeRaw: [new BN(0), new BN(0)],
-      oddsPercent: [78, 22],
-      closeTs: now + 3600 * 10,
-      resolveTs: now + 3600 * 10 + 300,
-      status: "open",
-      winningOutcome: null,
-      feesCollected: false,
-    },
+    display: pool(
+      "How many posts will Davido make today?",
+      ["0-2", "3-5", "6+"],
+      [20, 35, 45],
+      false,
+      "open",
+      3600 * 10
+    ),
   },
   {
     pda: mockPda("gist-lover"),
-    display: {
-      question: "Will GistLover post about Davido before midnight?",
-      outcomeNames: ["Yes", "No"],
-      isNativeSol: true,
-      tokenMint: null,
-      totalStakedRaw: new BN(0),
-      stakePerOutcomeRaw: [new BN(0), new BN(0)],
-      oddsPercent: [55, 45],
-      closeTs: now - 3600,
-      resolveTs: now - 3300,
-      status: "resolved",
-      winningOutcome: 0,
-      feesCollected: true,
-    },
+    display: pool("Will GistLover post about Davido before midnight?", ["Yes", "No"], [55, 45], true, "resolved", -3600),
   },
 ];

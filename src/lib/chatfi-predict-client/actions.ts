@@ -1,5 +1,5 @@
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { Program, BN } from "@coral-xyz/anchor";
+import { BN } from "@coral-xyz/anchor";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import {
   getConfigPda,
@@ -8,7 +8,7 @@ import {
   getVaultTokenPda,
   getStakePda,
 } from "./pda";
-import { PoolAccount, StakeAccount, toPoolDisplay, PoolDisplay } from "./types";
+import { PoolAccount, StakeAccount, ConfigAccount, toPoolDisplay, PoolDisplay } from "./types";
 
 /**
  * `program` is the Anchor Program instance for chatfi-predict, already
@@ -21,11 +21,19 @@ import { PoolAccount, StakeAccount, toPoolDisplay, PoolDisplay } from "./types";
 export async function initializeConfig(
   program: any,
   authority: PublicKey,
-  platformTreasury: PublicKey
+  platformTreasury: PublicKey,
+  poolCreationFeeLamports: number | BN,
+  disputeBondLamports: number | BN,
+  disputeWindowSecs: number
 ): Promise<string> {
   const [configPda] = getConfigPda(program.programId);
   return program.methods
-    .initializeConfig(platformTreasury)
+    .initializeConfig(
+      platformTreasury,
+      new BN(poolCreationFeeLamports),
+      new BN(disputeBondLamports),
+      new BN(disputeWindowSecs)
+    )
     .accounts({
       authority,
       config: configPda,
@@ -34,16 +42,47 @@ export async function initializeConfig(
     .rpc();
 }
 
+export async function updatePoolCreationFee(
+  program: any,
+  authority: PublicKey,
+  newFeeLamports: number | BN
+): Promise<string> {
+  const [configPda] = getConfigPda(program.programId);
+  return program.methods
+    .updatePoolCreationFee(new BN(newFeeLamports))
+    .accounts({ config: configPda, authority })
+    .rpc();
+}
+
+export async function updateDisputeSettings(
+  program: any,
+  authority: PublicKey,
+  newBondLamports: number | BN,
+  newWindowSecs: number
+): Promise<string> {
+  const [configPda] = getConfigPda(program.programId);
+  return program.methods
+    .updateDisputeSettings(new BN(newBondLamports), new BN(newWindowSecs))
+    .accounts({ config: configPda, authority })
+    .rpc();
+}
+
+export async function fetchConfig(program: any): Promise<ConfigAccount> {
+  const [configPda] = getConfigPda(program.programId);
+  return (await program.account.config.fetch(configPda)) as ConfigAccount;
+}
+
 // ---------- Create pool ----------
 
 export interface CreatePoolParams {
   creator: PublicKey;
   admin: PublicKey;
   question: string;
-  outcomeNames: [string, string];
+  /** 2 to 8 outcome labels, e.g. ["Yes", "No"] or ["Tinubu", "Obi", "Atiku"]. */
+  outcomeNames: string[];
   /** Unix seconds. Betting closes at this time. */
   closeTs: number;
-  /** Unix seconds. Must be >= closeTs + 60. Earliest time admin can resolve. */
+  /** Unix seconds. Must be >= closeTs + 60. Earliest time resolution can be proposed. */
   resolveTs: number;
 }
 
@@ -51,8 +90,14 @@ export async function createPoolNative(
   program: any,
   params: CreatePoolParams
 ): Promise<{ signature: string; poolPda: PublicKey }> {
+  if (params.outcomeNames.length < 2 || params.outcomeNames.length > 8) {
+    throw new Error("A pool needs between 2 and 8 outcomes.");
+  }
+
   const [poolPda] = getPoolPda(params.creator, params.question, program.programId);
   const [vaultPda] = getVaultPda(poolPda, program.programId);
+  const [configPda] = getConfigPda(program.programId);
+  const config = await fetchConfig(program);
 
   const signature = await program.methods
     .createPoolNative(
@@ -64,38 +109,10 @@ export async function createPoolNative(
     .accounts({
       creator: params.creator,
       admin: params.admin,
+      config: configPda,
+      platformTreasury: config.platformTreasury,
       pool: poolPda,
       vaultAuthority: vaultPda,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
-
-  return { signature, poolPda };
-}
-
-export async function createPoolSpl(
-  program: any,
-  params: CreatePoolParams & { tokenMint: PublicKey }
-): Promise<{ signature: string; poolPda: PublicKey }> {
-  const [poolPda] = getPoolPda(params.creator, params.question, program.programId);
-  const [vaultPda] = getVaultPda(poolPda, program.programId);
-  const [vaultTokenPda] = getVaultTokenPda(poolPda, program.programId);
-
-  const signature = await program.methods
-    .createPoolSpl(
-      params.question,
-      params.outcomeNames,
-      new BN(params.closeTs),
-      new BN(params.resolveTs)
-    )
-    .accounts({
-      creator: params.creator,
-      admin: params.admin,
-      tokenMint: params.tokenMint,
-      pool: poolPda,
-      vaultAuthority: vaultPda,
-      vaultTokenAccount: vaultTokenPda,
-      tokenProgram: TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
     })
     .rpc();
@@ -109,7 +126,7 @@ export async function placeStakeNative(
   program: any,
   user: PublicKey,
   poolPda: PublicKey,
-  outcome: 0 | 1,
+  outcome: number,
   amountLamports: number | BN
 ): Promise<string> {
   const [vaultPda] = getVaultPda(poolPda, program.programId);
@@ -127,44 +144,97 @@ export async function placeStakeNative(
     .rpc();
 }
 
-export async function placeStakeSpl(
+// ---------- Dispute-based resolution flow ----------
+
+/** Anyone can propose an outcome once resolve_ts has passed. Requires a bond. */
+export async function proposeResolution(
   program: any,
-  user: PublicKey,
+  proposer: PublicKey,
   poolPda: PublicKey,
-  userTokenAccount: PublicKey,
-  outcome: 0 | 1,
-  amount: number | BN
+  proposedOutcome: number
 ): Promise<string> {
+  const [configPda] = getConfigPda(program.programId);
   const [vaultPda] = getVaultPda(poolPda, program.programId);
-  const [vaultTokenPda] = getVaultTokenPda(poolPda, program.programId);
-  const [stakePda] = getStakePda(poolPda, user, program.programId);
 
   return program.methods
-    .placeStakeSpl(outcome, new BN(amount))
+    .proposeResolution(proposedOutcome)
     .accounts({
-      user,
+      proposer,
+      config: configPda,
       pool: poolPda,
       vaultAuthority: vaultPda,
-      vaultTokenAccount: vaultTokenPda,
-      userTokenAccount,
-      stake: stakePda,
-      tokenProgram: TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
     })
     .rpc();
 }
 
-// ---------- Resolve ----------
+/** Anyone except the proposer can dispute within the window. Requires a matching bond. */
+export async function disputeResolution(
+  program: any,
+  disputer: PublicKey,
+  poolPda: PublicKey
+): Promise<string> {
+  const [configPda] = getConfigPda(program.programId);
+  const [vaultPda] = getVaultPda(poolPda, program.programId);
 
-export async function resolvePool(
+  return program.methods
+    .disputeResolution()
+    .accounts({
+      disputer,
+      config: configPda,
+      pool: poolPda,
+      vaultAuthority: vaultPda,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+}
+
+/** Permissionless: finalizes an uncontested proposal once the window has passed. */
+export async function finalizeResolution(
+  program: any,
+  payer: PublicKey,
+  poolPda: PublicKey,
+  proposerWallet: PublicKey
+): Promise<string> {
+  const [configPda] = getConfigPda(program.programId);
+  const [vaultPda] = getVaultPda(poolPda, program.programId);
+
+  return program.methods
+    .finalizeResolution()
+    .accounts({
+      payer,
+      config: configPda,
+      pool: poolPda,
+      vaultAuthority: vaultPda,
+      proposerWallet,
+      systemProgram: SystemProgram.programId,
+    })
+    .rpc();
+}
+
+/** Admin-only tiebreaker for a disputed pool. Winner takes both bonds. */
+export async function adminResolveDispute(
   program: any,
   admin: PublicKey,
   poolPda: PublicKey,
-  winningOutcome: 0 | 1
+  finalOutcome: number,
+  proposerWallet: PublicKey,
+  disputerWallet: PublicKey
 ): Promise<string> {
+  const [configPda] = getConfigPda(program.programId);
+  const [vaultPda] = getVaultPda(poolPda, program.programId);
+
   return program.methods
-    .resolvePool(winningOutcome)
-    .accounts({ admin, pool: poolPda })
+    .adminResolveDispute(finalOutcome)
+    .accounts({
+      admin,
+      config: configPda,
+      pool: poolPda,
+      vaultAuthority: vaultPda,
+      proposerWallet,
+      disputerWallet,
+      systemProgram: SystemProgram.programId,
+    })
     .rpc();
 }
 
@@ -178,7 +248,7 @@ export async function collectFeesNative(
 ): Promise<string> {
   const [configPda] = getConfigPda(program.programId);
   const [vaultPda] = getVaultPda(poolPda, program.programId);
-  const config = await program.account.config.fetch(configPda);
+  const config = await fetchConfig(program);
 
   return program.methods
     .collectFeesNative()
@@ -190,32 +260,6 @@ export async function collectFeesNative(
       platformTreasury: config.platformTreasury,
       creatorWallet,
       systemProgram: SystemProgram.programId,
-    })
-    .rpc();
-}
-
-export async function collectFeesSpl(
-  program: any,
-  payer: PublicKey,
-  poolPda: PublicKey,
-  platformTreasuryTokenAccount: PublicKey,
-  creatorTokenAccount: PublicKey
-): Promise<string> {
-  const [configPda] = getConfigPda(program.programId);
-  const [vaultPda] = getVaultPda(poolPda, program.programId);
-  const [vaultTokenPda] = getVaultTokenPda(poolPda, program.programId);
-
-  return program.methods
-    .collectFeesSpl()
-    .accounts({
-      payer,
-      config: configPda,
-      pool: poolPda,
-      vaultAuthority: vaultPda,
-      vaultTokenAccount: vaultTokenPda,
-      platformTreasuryToken: platformTreasuryTokenAccount,
-      creatorTokenAccount,
-      tokenProgram: TOKEN_PROGRAM_ID,
     })
     .rpc();
 }
@@ -242,36 +286,9 @@ export async function claimPayoutNative(
     .rpc();
 }
 
-export async function claimPayoutSpl(
-  program: any,
-  user: PublicKey,
-  poolPda: PublicKey,
-  userTokenAccount: PublicKey
-): Promise<string> {
-  const [vaultPda] = getVaultPda(poolPda, program.programId);
-  const [vaultTokenPda] = getVaultTokenPda(poolPda, program.programId);
-  const [stakePda] = getStakePda(poolPda, user, program.programId);
-
-  return program.methods
-    .claimPayoutSpl()
-    .accounts({
-      user,
-      pool: poolPda,
-      vaultAuthority: vaultPda,
-      vaultTokenAccount: vaultTokenPda,
-      userTokenAccount,
-      stake: stakePda,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .rpc();
-}
-
 // ---------- Reads, for building the UI ----------
 
-export async function fetchPool(
-  program: any,
-  poolPda: PublicKey
-): Promise<PoolDisplay> {
+export async function fetchPool(program: any, poolPda: PublicKey): Promise<PoolDisplay> {
   const raw = (await program.account.pool.fetch(poolPda)) as PoolAccount;
   return toPoolDisplay(raw);
 }
@@ -285,7 +302,6 @@ export async function fetchStake(
   try {
     return (await program.account.stake.fetch(stakePda)) as StakeAccount;
   } catch {
-    // Account doesn't exist yet, meaning this user hasn't staked on this pool.
     return null;
   }
 }
